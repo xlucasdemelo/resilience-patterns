@@ -1,10 +1,8 @@
 package com.lucasaguiar.resilience;
 
 import com.lucasaguiar.resilience.client.BookClient;
-import io.github.resilience4j.bulkhead.Bulkhead;
-import io.github.resilience4j.bulkhead.BulkheadConfig;
-import io.github.resilience4j.bulkhead.ThreadPoolBulkhead;
-import io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfig;
+import io.github.resilience4j.bulkhead.*;
+import io.github.resilience4j.bulkhead.event.BulkheadEvent;
 import io.github.resilience4j.ratelimiter.RateLimiter;
 import io.github.resilience4j.ratelimiter.event.RateLimiterEvent;
 import io.vavr.collection.Stream;
@@ -13,9 +11,11 @@ import lombok.extern.slf4j.Slf4j;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import org.junit.Rule;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.*;
@@ -29,7 +29,7 @@ public class BulkheadTest {
 
     @Rule
     public MockWebServer mockWebServer = new MockWebServer();
-    private List<RateLimiterEvent> events = new ArrayList<>();
+    private List<BulkheadEvent> events = new ArrayList<>();
 
     private static final int NUMBER_OF_BOOKS = 5;
     private static final int NUMBER_OF_PEOPLE = 20;
@@ -40,11 +40,16 @@ public class BulkheadTest {
         availableBooks = new AtomicLong(NUMBER_OF_BOOKS);
     }
 
+//    @AfterEach
+    void afterEach(){
+        this.events.stream().forEach(event -> log.info(event.toString()));
+    }
+
     private <T> void everybodyInTheLibrary(Runnable task) throws InterruptedException {
         ExecutorService service = Executors.newFixedThreadPool(NUMBER_OF_PEOPLE);
         List<Callable<Object>> tasks = Stream.continually(task)
                 .map(Executors::callable)
-                .take(NUMBER_OF_PEOPLE).toJavaList();
+                .take(20).toJavaList();
         service.invokeAll(tasks, 500, TimeUnit.MILLISECONDS);
     }
 
@@ -62,6 +67,11 @@ public class BulkheadTest {
     }
 
     @Test
+    void unlimited() throws InterruptedException {
+        everybodyInTheLibrary(this::takeBook);
+    }
+
+    @Test
     void synchronize() throws InterruptedException {
         everybodyInTheLibrary(this::takeBookSync);
     }
@@ -71,54 +81,50 @@ public class BulkheadTest {
     }
 
     @Test
-    void unlimited() throws InterruptedException {
-        everybodyInTheLibrary(this::takeBook);
-    }
-
-    @Test
     void threadPoolBulkhead() throws InterruptedException {
+        //Only 5 Threads will be the hability to execute a code
         ThreadPoolBulkhead threadPoolBulkhead = ThreadPoolBulkhead.of("threads", ThreadPoolBulkheadConfig.custom()
-                .coreThreadPoolSize(NUMBER_OF_BOOKS)
-                .maxThreadPoolSize(NUMBER_OF_BOOKS)
-//                .queueCapacity(1)
+                .coreThreadPoolSize(5)
+                .maxThreadPoolSize(5)
                 .build());
 
+        //Decorating the execution of the method and the configuration of the threadPool
         Supplier<CompletionStage<Void>> withBulkhead = ThreadPoolBulkhead.decorateRunnable(threadPoolBulkhead, this::takeBook);
 
-        withBulkhead.get();
+        //Creating a new ExecutorService
+        ExecutorService service = Executors.newFixedThreadPool(NUMBER_OF_PEOPLE);
+
+        //Wrapping the execution of the bulkhead inside  a task
+        Runnable task = () -> {
+            log.info("Try to get a book");
+            Try.ofSupplier(withBulkhead);
+        };
+
+        //Creating N threads to execute the task
+        List<Callable<Object>> tasks = Stream.continually(task)
+                .map(Executors::callable)
+                .take(NUMBER_OF_BOOKS).toJavaList();
+
+        //Running all the threads
+        service.invokeAll(tasks, 500, TimeUnit.MILLISECONDS);
     }
 
     @Test
-    void bulkhead() throws InterruptedException {
+    void semaphore() throws InterruptedException {
         Bulkhead bulkhead = Bulkhead.of("semaphore", BulkheadConfig.custom()
                 .maxConcurrentCalls(NUMBER_OF_BOOKS)
                 .build());
         Runnable withBulkhead = Bulkhead.decorateRunnable(bulkhead, this::takeBook);
 
+        this.captureEvents(bulkhead.getEventPublisher());
+
         everybodyInTheLibrary(withBulkhead);
     }
 
-    public void captureEvents(RateLimiter.EventPublisher eventPublisher) {
+    public void captureEvents(Bulkhead.EventPublisher eventPublisher) {
         eventPublisher.onEvent(events::add);
-        eventPublisher.onSuccess(e -> log.info(e.toString()));
-        eventPublisher.onFailure(e -> log.info(e.toString()));
+//        eventPublisher.onCallPermitted(e -> log.info(e.toString()));
+//        eventPublisher.onCallRejected(e -> log.info(e.toString()));
     }
 
-    public void enqueue(Integer queues, MockResponse mockResponse){
-        for (var i = 0; i < queues; i++){
-            this.mockWebServer.enqueue(mockResponse);
-        }
-    }
-
-    public void enqueueList(List<MockResponse> responseList){
-        responseList.forEach(response -> this.mockWebServer.enqueue(response));
-    }
-
-    public <T> List<Try<T>> repeat(int n, Supplier<T> action, MockResponse mockResponse) {
-        this.enqueue(n, mockResponse);
-        return Stream.<Supplier<T>>continually(action)
-                .map(Try::ofSupplier)
-                .take(n)
-                .toJavaList();
-    }
 }

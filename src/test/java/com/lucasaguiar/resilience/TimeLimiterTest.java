@@ -18,15 +18,18 @@ public class TimeLimiterTest {
 
     @Test
     void durarionLess_ShouldPass() {
+        //Defines a timelimiter
         TimeLimiter timeLimiter = TimeLimiter.of(TimeLimiterConfig.custom()
                 .timeoutDuration(Duration.ofMillis(100))
                 .build());
 
-        Callable<Integer> wait42 = TimeLimiter.decorateFutureSupplier(timeLimiter, () -> sleep(42));
+        //Will Decorate a function that takes 42ms to execute
+        Callable<Integer> wait = TimeLimiter.decorateFutureSupplier(timeLimiter, () -> sleep(42));
 
-        Try<Integer> dream = Try.ofCallable(wait42);
+        //Execute the decorator
+        Try<Integer> response = Try.ofCallable(wait);
 
-        Assertions.assertThat(dream).contains(42);
+        Assertions.assertThat(response).contains(42);
     }
 
     @Test
@@ -35,12 +38,12 @@ public class TimeLimiterTest {
                 .timeoutDuration(Duration.ofMillis(100))
                 .build());
 
-        Callable<Integer> wait666 = TimeLimiter.decorateFutureSupplier(timeLimiter, () -> sleep(666));
+        Callable<Integer> wait = TimeLimiter.decorateFutureSupplier(timeLimiter, () -> sleep(777));
 
-        Try<Integer> dream = Try.ofCallable(wait666);
+        Try<Integer> response = Try.ofCallable(wait);
 
-        Assertions.assertThat(dream).isEmpty();
-        Assertions.assertThat(dream.getCause()).isInstanceOf(TimeoutException.class);
+        Assertions.assertThat(response).isEmpty();
+        Assertions.assertThat(response.getCause()).isInstanceOf(TimeoutException.class);
     }
 
     private Future<Integer> sleep(int millis) {

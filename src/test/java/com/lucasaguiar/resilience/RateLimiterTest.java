@@ -7,8 +7,6 @@ import feign.gson.GsonDecoder;
 import feign.gson.GsonEncoder;
 import feign.okhttp.OkHttpClient;
 import feign.slf4j.Slf4jLogger;
-import io.github.resilience4j.circuitbreaker.event.CircuitBreakerEvent;
-import io.github.resilience4j.core.EventPublisher;
 import io.github.resilience4j.ratelimiter.RateLimiter;
 import io.github.resilience4j.ratelimiter.RateLimiterConfig;
 import io.github.resilience4j.ratelimiter.RequestNotPermitted;
@@ -58,7 +56,7 @@ public class RateLimiterTest {
                 .setResponseCode(200)
                 .addHeader("Content-Type", "application/json;charset=utf-8");
 
-
+        //Resilience4J configuration for RateLimiter
         RateLimiterConfig config = RateLimiterConfig.custom()
                 .timeoutDuration(Duration.ofMillis(100))
                 .limitRefreshPeriod(Duration.ofSeconds(1))
@@ -74,7 +72,9 @@ public class RateLimiterTest {
         Supplier<String> restrictedSupplier = RateLimiter
                 .decorateSupplier(rateLimiter, bookClient::findAll);
 
+        //THis prepares the mock server to mock 2 requests
         this.enqueue(2, mockResponse);
+
         // First call is successful
         Try<String> firstTry = Try.ofSupplier(restrictedSupplier);
         Assertions.assertThat(firstTry.isSuccess()).isTrue();

@@ -60,7 +60,7 @@ public class CircuitBreakerTest {
     }
 
     @Test
-    public void circuitBreaker_example() throws Exception {
+    public void countBased_example() throws Exception {
         MockResponse mockResponse = new MockResponse()
                 .setResponseCode(500)
                 .addHeader("Content-Type", "application/json;charset=utf-8");
